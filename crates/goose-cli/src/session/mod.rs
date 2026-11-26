@@ -3,6 +3,7 @@ mod completion;
 pub mod editor;
 mod elicitation;
 mod input;
+mod model_picker;
 mod output;
 mod paste;
 mod program_status;
@@ -917,7 +918,16 @@ impl CliSession {
             .await?;
         let current_model_name = current_model_config.model_name.clone();
 
-        if options.provider.is_none() && options.model.is_none() {
+        let requested_provider = options
+            .provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let use_picker = options.model.is_none()
+            && std::io::stdin().is_terminal()
+            && std::io::stdout().is_terminal();
+
+        if !use_picker && requested_provider.is_none() && options.model.is_none() {
             output::goose_mode_message(&format!(
                 "Current session model: '{}' (provider '{}')\n\
                  Tip: use '/model <name>' to switch model, or '/model --provider <name> [model]' to switch provider.",
@@ -926,17 +936,25 @@ impl CliSession {
             return Ok(());
         }
 
-        let requested_provider = options
-            .provider
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
-        let target_provider_name = requested_provider.unwrap_or(&current_provider_name);
-
-        if options.provider.is_some() && requested_provider.is_none() {
-            output::render_error("Provider name is required after '--provider'.");
+        if provider.manages_own_context() {
+            output::render_error(&format!(
+                "Session model or provider switching is not supported for provider '{}' because it manages its own conversation context.",
+                current_provider_name
+            ));
             return Ok(());
         }
+
+        let target_provider_name = match requested_provider {
+            Some(name) => name.to_string(),
+            None if use_picker => {
+                match model_picker::select_provider(&current_provider_name).await? {
+                    Some(name) => name,
+                    None => return Ok(()),
+                }
+            }
+            None => current_provider_name.clone(),
+        };
+        let target_provider_name = target_provider_name.as_str();
 
         let target_entry = match goose::providers::get_from_registry(target_provider_name).await {
             Ok(entry) => entry,
@@ -956,14 +974,6 @@ impl CliSession {
             return Ok(());
         }
 
-        if provider.manages_own_context() {
-            output::render_error(&format!(
-                "Session model or provider switching is not supported for provider '{}' because it manages its own conversation context.",
-                current_provider_name
-            ));
-            return Ok(());
-        }
-
         if options
             .model
             .as_deref()
@@ -975,6 +985,22 @@ impl CliSession {
 
         let target_model_name = match options.model.as_deref().map(str::trim) {
             Some(m) if !m.is_empty() => m.to_string(),
+            _ if use_picker => {
+                let models = self
+                    .completion_cache
+                    .read()
+                    .unwrap()
+                    .provider_models
+                    .get(target_provider_name)
+                    .cloned()
+                    .unwrap_or_default();
+                let current_model = (target_provider_name == current_provider_name)
+                    .then_some(current_model_name.as_str());
+                match model_picker::select_model(target_provider_name, &models, current_model)? {
+                    Some(model) => model,
+                    None => return Ok(()),
+                }
+            }
             _ => {
                 if target_provider_name == current_provider_name {
                     current_model_name.clone()

@@ -429,8 +429,8 @@ fn help_text() -> String {
 /prompts [--extension <name>] - List all available prompts, optionally filtered by extension
 /prompt <n> [--info] [key=value...] - Get prompt info or execute a prompt
 /mode <name> - Set the goose mode to use ({modes})
-/model [name] - Show the current model, or switch models for this session while keeping the same provider
-/model --provider <name> [model] - Switch to a different provider (optionally specifying a model)
+/model [name] - Pick a provider and model from a list, or switch to the named model on the current provider
+/model --provider <name> [model] - Switch provider; pick the model from a list if none is given
 /compact - Compact the current conversation to reduce context length while preserving key information.
 {additional_builtin_help}/status - Show session status: session ID, model, provider, mode, and token usage.
 /edit [text] - Open your prompt editor to compose a message. Optionally pre-fill with text.
